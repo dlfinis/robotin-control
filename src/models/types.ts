@@ -56,14 +56,16 @@ export interface ProjectConfig {
   chunkSize: number;
   chunkOverlap: number;
   embeddingModel: string;
-  llmModel: string;
+  lmStudioHost: string;
+  lmStudioModel: string;
 }
 
 export const DEFAULT_PROJECT_CONFIG: ProjectConfig = {
   chunkSize: 512,
   chunkOverlap: 50,
   embeddingModel: 'Xenova/all-MiniLM-L6-v2',
-  llmModel: 'llama2:7b',
+  lmStudioHost: 'http://localhost:1234',
+  lmStudioModel: 'local-model',
 };
 
 // ============================================================================

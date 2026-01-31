@@ -1,6 +1,6 @@
 node_modules/
 
-bun.lockb
+bun.lock
 .bun-cache/
 **/*.bun
 

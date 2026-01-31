@@ -8,7 +8,7 @@
 
 ## 📖 Overview
 
-**Robotin Control** is a cognitive assistant designed for technical projects (architecture, engineering, software development, etc.) that:
+**Robotin Control** is an AI-powered assistant designed for technical teams (software engineers, architects, designers) that:
 
 - **Understands and remembers** the unique context of each project
 - **Responds with fidelity** to real project knowledge, avoiding hallucinations
@@ -22,7 +22,7 @@
 - 📄 **Document Ingestion**: Process TXT, OpenAPI, and PlantUML files
 - 🔍 **Deterministic Query Engine**: Search and synthesize information with source attribution
 - 🧠 **Contextual Memory**: Maintain project state across sessions
-- 🎯 **Zero Hallucination**: All responses traceable to source documents
+- ✅ **Zero Hallucination**: All responses traceable to source documents
 - 🔗 **Knowledge Graph**: Connected concepts, decisions, and artifacts
 
 ### Interfaces
@@ -34,7 +34,7 @@
 
 ### Prerequisites
 - [Bun](https://bun.sh) >= 1.0.26
-- [Ollama](https://ollama.ai) (optional, for local LLM)
+- [LM Studio](https://lmstudio.ai) (for local LLM)
 
 ### Installation
 
@@ -56,6 +56,14 @@ bun run dev
 bun run build
 bun start
 ```
+
+### Setting up LM Studio
+
+1. Download and install [LM Studio](https://lmstudio.ai)
+2. Download a model (e.g., Llama 2 7B, Mistral 7B, or CodeLlama 7B)
+3. Load the model in LM Studio
+4. Start the local server (default: http://localhost:1234)
+5. Verify it's running by visiting http://localhost:1234/v1/models
 
 ### CLI Usage
 
@@ -119,9 +127,19 @@ bun run dev status
 | Vectors | [LanceDB](https://lancedb.github.io/lancedb/) | Embedded vector database for semantic search |
 | Metadata | [SQLite](https://www.sqlite.org/) (better-sqlite3) | Relational data with ACID guarantees |
 | Embeddings | [Transformers.js](https://huggingface.co/docs/transformers.js) | Local embedding generation |
-| LLM | [Ollama](https://ollama.ai) + OpenAI fallback | Local LLM with cloud fallback |
+| LLM | [LM Studio](https://lmstudio.ai) + OpenAI fallback | Local LLM with GUI and OpenAI-compatible API |
 | API | [Elysia](https://elysiajs.com) | High-performance web framework |
-| CLI | Custom (Cliffy) | Command-line interface |
+| CLI | Custom | Command-line interface |
+
+### Why LM Studio?
+
+LM Studio provides several advantages over other local LLM solutions:
+
+- **Visual Interface**: Easy model management and configuration
+- **OpenAI-Compatible API**: Drop-in replacement for OpenAI's API
+- **Model Discovery**: Direct access to HuggingFace model repository
+- **Multiple Models**: Keep several models loaded simultaneously
+- **No Command Line**: GUI for all operations
 
 ## 📁 Project Structure
 
@@ -131,6 +149,7 @@ robotin-control/
 │   ├── cli/                    # Command-line interface
 │   │   └── index.ts
 │   ├── core/                   # Core business logic
+│   │   ├── llm/               # LLM service (LM Studio integration)
 │   │   ├── parser/            # Document parsers (txt, openapi, plantuml)
 │   │   ├── embedder/          # Embedding generation
 │   │   ├── storage/           # Data persistence layer
@@ -182,8 +201,9 @@ bun start
 | `ROBOTIN_DATA_DIR` | Data storage directory | `./data` |
 | `DATABASE_PATH` | SQLite database path | `./data/robotin.db` |
 | `ROBOTIN_LOG_LEVEL` | Log level (trace, debug, info, warn, error) | `info` |
-| `OLLAMA_HOST` | Ollama server URL | `http://localhost:11434` |
-| `OPENAI_API_KEY` | OpenAI API key (optional) | - |
+| `LM_STUDIO_HOST` | LM Studio server URL | `http://localhost:1234` |
+| `LM_STUDIO_MODEL` | Model name in LM Studio | `local-model` |
+| `OPENAI_API_KEY` | OpenAI API key (optional fallback) | - |
 
 ## 📚 Documentation
 
@@ -218,7 +238,7 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 - Built with [Bun](https://bun.sh) for blazing fast performance
 - Vector search powered by [LanceDB](https://lancedb.github.io/lancedb/)
-- Local AI with [Ollama](https://ollama.ai)
+- Local AI with [LM Studio](https://lmstudio.ai)
 
 ---
 

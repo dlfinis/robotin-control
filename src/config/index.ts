@@ -18,9 +18,9 @@ const configSchema = z.object({
   // Logging
   logLevel: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal']).default('info'),
   
-  // LLM Configuration
-  ollamaHost: z.string().default('http://localhost:11434'),
-  ollamaModel: z.string().default('llama2:7b'),
+  // LLM Configuration (LM Studio)
+  lmStudioHost: z.string().default('http://localhost:1234'),
+  lmStudioModel: z.string().default('local-model'),
   
   // Fallback (optional)
   openaiApiKey: z.string().optional(),
@@ -55,8 +55,8 @@ function loadConfig(): Config {
     cachePath: env.ROBOTIN_CACHE_PATH,
     databasePath: env.DATABASE_PATH,
     logLevel: env.ROBOTIN_LOG_LEVEL,
-    ollamaHost: env.OLLAMA_HOST,
-    ollamaModel: env.OLLAMA_MODEL,
+    lmStudioHost: env.LM_STUDIO_HOST,
+    lmStudioModel: env.LM_STUDIO_MODEL,
     openaiApiKey: env.OPENAI_API_KEY,
     openaiModel: env.OPENAI_MODEL,
     embeddingModel: env.EMBEDDING_MODEL,

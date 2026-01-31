@@ -79,7 +79,8 @@ async function initProject(name?: string) {
       chunkSize: 512,
       chunkOverlap: 50,
       embeddingModel: 'Xenova/all-MiniLM-L6-v2',
-      llmModel: 'llama2:7b',
+      lmStudioHost: 'http://localhost:1234',
+    lmStudioModel: 'local-model',
     },
   };
 
