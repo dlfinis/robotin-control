@@ -1,0 +1,284 @@
+import * as lancedb from '@lancedb/lancedb';
+import { getConfig } from '../../config';
+import { getLogger } from '../../utils/logger';
+import type { Embedding, ProjectId, DocumentType } from '../../models/types';
+
+const logger = getLogger().child({ module: 'VectorStore' });
+
+/**
+ * Search result from vector store
+ */
+export interface SearchResult {
+  chunkId: string;
+  documentId: string;
+  projectId: string;
+  content: string;
+  relevance: number;
+  metadata: {
+    documentType: DocumentType;
+    section?: string;
+    weight: number;
+  };
+}
+
+/**
+ * Options for vector search
+ */
+export interface SearchOptions {
+  projectId?: ProjectId;
+  documentTypes?: DocumentType[];
+  limit?: number;
+  threshold?: number;
+}
+
+const DEFAULT_SEARCH_OPTIONS: SearchOptions = {
+  limit: 10,
+  threshold: 0.7,
+};
+
+/**
+ * VectorStore manages embeddings in LanceDB
+ * Provides semantic search capabilities
+ */
+export class VectorStore {
+  private db: lancedb.Connection | null = null;
+  private table: lancedb.Table | null = null;
+  private config = getConfig();
+  private isInitialized = false;
+
+  /**
+   * Initialize the vector store connection
+   */
+  async initialize(): Promise<void> {
+    if (this.isInitialized) {
+      return;
+    }
+
+    try {
+      // Connect to LanceDB
+      this.db = await lancedb.connect(this.config.lanceDbPath);
+      
+      // Get or create embeddings table
+      const tableNames = await this.db.tableNames();
+      
+      if (tableNames.includes('embeddings')) {
+        this.table = await this.db.openTable('embeddings');
+        logger.info('Opened existing embeddings table');
+      } else {
+        this.table = await this.createEmbeddingsTable();
+        logger.info('Created new embeddings table');
+      }
+
+      this.isInitialized = true;
+    } catch (error) {
+      logger.error({ error }, 'Failed to initialize VectorStore');
+      throw error;
+    }
+  }
+
+  /**
+   * Create the embeddings table with schema
+   */
+  private async createEmbeddingsTable(): Promise<lancedb.Table> {
+    if (!this.db) {
+      throw new Error('Database not initialized');
+    }
+
+    // Create empty table - LanceDB will infer schema from first insert
+    const table = await this.db.createTable('embeddings', []);
+
+    logger.info('Created embeddings table');
+    return table;
+  }
+
+  /**
+   * Add a single embedding to the store
+   */
+  async addEmbedding(embedding: Embedding): Promise<void> {
+    await this.ensureInitialized();
+    
+    if (!this.table) {
+      throw new Error('Table not initialized');
+    }
+
+    const record = {
+      id: embedding.id,
+      chunkId: embedding.chunkId,
+      documentId: embedding.documentId,
+      projectId: embedding.projectId,
+      vector: Array.from(embedding.vector),
+      content: embedding.content,
+      contentLength: embedding.contentLength,
+      documentType: embedding.documentType,
+      section: embedding.section,
+      weight: embedding.weight,
+      createdAt: embedding.createdAt,
+    };
+
+    await this.table.add([record]);
+    logger.debug({ embeddingId: embedding.id }, 'Embedding added');
+  }
+
+  /**
+   * Add multiple embeddings in batch
+   */
+  async addEmbeddings(embeddings: Embedding[]): Promise<void> {
+    await this.ensureInitialized();
+    
+    if (!this.table) {
+      throw new Error('Table not initialized');
+    }
+
+    if (embeddings.length === 0) {
+      return;
+    }
+
+    const records = embeddings.map(embedding => ({
+      id: embedding.id,
+      chunkId: embedding.chunkId,
+      documentId: embedding.documentId,
+      projectId: embedding.projectId,
+      vector: Array.from(embedding.vector),
+      content: embedding.content,
+      contentLength: embedding.contentLength,
+      documentType: embedding.documentType,
+      section: embedding.section,
+      weight: embedding.weight,
+      createdAt: embedding.createdAt,
+    }));
+
+    // Add in batches of 100
+    const batchSize = 100;
+    for (let i = 0; i < records.length; i += batchSize) {
+      const batch = records.slice(i, i + batchSize);
+      await this.table.add(batch);
+    }
+
+    logger.debug({ count: embeddings.length }, 'Embeddings added in batches');
+  }
+
+  /**
+   * Search for similar vectors
+   */
+  async search(
+    queryVector: Float32Array,
+    options: SearchOptions = {}
+  ): Promise<SearchResult[]> {
+    await this.ensureInitialized();
+    
+    if (!this.table) {
+      throw new Error('Table not initialized');
+    }
+
+    const opts = { ...DEFAULT_SEARCH_OPTIONS, ...options };
+
+    // Build query
+    const query = this.table.search(Array.from(queryVector));
+
+    // Apply filters
+    const filters: string[] = [];
+    
+    if (opts.projectId) {
+      filters.push(`projectId = '${opts.projectId}'`);
+    }
+    
+    if (opts.documentTypes && opts.documentTypes.length > 0) {
+      const typeList = opts.documentTypes.map(t => `'${t}'`).join(', ');
+      filters.push(`documentType in (${typeList})`);
+    }
+
+    if (filters.length > 0) {
+      query.where(filters.join(' AND '));
+    }
+
+    // Execute search
+    const results = await query.limit(opts.limit!).toArray();
+
+    // Map results
+    return results.map((row: Record<string, unknown>) => ({
+      chunkId: row.chunkId as string,
+      documentId: row.documentId as string,
+      projectId: row.projectId as string,
+      content: row.content as string,
+      relevance: 1 - ((row._distance as number) || 0),
+      metadata: {
+        documentType: row.documentType as DocumentType,
+        section: row.section as string | undefined,
+        weight: row.weight as number,
+      },
+    })).filter(result => result.relevance >= (opts.threshold || 0));
+  }
+
+  /**
+   * Delete all embeddings for a document
+   */
+  async deleteByDocumentId(documentId: string): Promise<void> {
+    await this.ensureInitialized();
+    
+    if (!this.table) {
+      throw new Error('Table not initialized');
+    }
+
+    await this.table.delete(`documentId = '${documentId}'`);
+    logger.debug({ documentId }, 'Embeddings deleted for document');
+  }
+
+  /**
+   * Delete all embeddings for a project
+   */
+  async deleteByProjectId(projectId: ProjectId): Promise<void> {
+    await this.ensureInitialized();
+    
+    if (!this.table) {
+      throw new Error('Table not initialized');
+    }
+
+    await this.table.delete(`projectId = '${projectId}'`);
+    logger.debug({ projectId }, 'Embeddings deleted for project');
+  }
+
+  /**
+   * Close the vector store connection
+   */
+  async close(): Promise<void> {
+    if (this.db) {
+      this.db = null;
+    }
+    this.table = null;
+    this.isInitialized = false;
+    logger.info('VectorStore closed');
+  }
+
+  /**
+   * Ensure the store is initialized before use
+   */
+  private async ensureInitialized(): Promise<void> {
+    if (!this.isInitialized) {
+      await this.initialize();
+    }
+  }
+}
+
+// Singleton instance
+let vectorStoreInstance: VectorStore | null = null;
+
+/**
+ * Get the VectorStore singleton
+ */
+export async function getVectorStore(): Promise<VectorStore> {
+  if (!vectorStoreInstance) {
+    vectorStoreInstance = new VectorStore();
+    await vectorStoreInstance.initialize();
+  }
+  return vectorStoreInstance;
+}
+
+/**
+ * Reset the VectorStore singleton
+ */
+export async function resetVectorStore(): Promise<void> {
+  if (vectorStoreInstance) {
+    await vectorStoreInstance.close();
+    vectorStoreInstance = null;
+  }
+}

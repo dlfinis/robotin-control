@@ -1,0 +1,13 @@
+[install]
+registry = "https://registry.npmjs.org"
+
+[run]
+env = [
+  "ROBOTIN_ENV=development",
+  "ROBOTIN_LOG_LEVEL=debug"
+]
+
+[test]
+# Configuración de tests
+coverage = true
+coverageThreshold = 0.8
