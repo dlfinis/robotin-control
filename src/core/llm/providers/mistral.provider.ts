@@ -1,38 +1,42 @@
 import type { LLMProvider, Message, LLMOptions, LLMResponse } from '../llm.service';
 import { getLogger } from '../../../utils/logger';
 
-const logger = getLogger().child({ module: 'KimiProvider' });
+const logger = getLogger().child({ module: 'MistralProvider' });
 
 /**
- * Kimi (Moonshot AI) API Provider
- * OpenAI-compatible API with exceptional long-context capabilities
+ * Mistral AI API Provider
+ * OpenAI-compatible API with strong European models
  * 
  * Pricing (Jan 2025):
- * - Kimi K2.5: ~$0.50 / 1M input, ~$1.50 / 1M output
+ * - Mistral Small: $0.10 / 1M input, $0.30 / 1M output
+ * - Mistral Medium: $0.60 / 1M input, $1.80 / 1M output  
+ * - Mistral Large: $2.00 / 1M input, $6.00 / 1M output
  * 
  * Key Features:
- * - 256K context window (2x GPT-4)
- * - Trillion-parameter model
- * - Excellent for long documents
- * - Native tool calling
+ * - Fast inference (Small model)
+ * - Good code generation
+ * - European data sovereignty
+ * - JSON mode support
  */
-export class KimiProvider implements LLMProvider {
-  readonly name = 'kimi';
-  readonly baseURL = 'https://api.kimi.com/coding/v1';
-  readonly defaultModel = 'kimi-k2.5';
-  readonly maxContext = 256000;
+export class MistralProvider implements LLMProvider {
+  readonly name = 'mistral';
+  readonly baseURL = 'https://api.mistral.ai/v1';
+  readonly defaultModel = 'mistral-small-latest';
+  readonly maxContext = 32000;
 
   private apiKey: string;
+  private model: string;
 
-  constructor(apiKey: string) {
+  constructor(apiKey: string, model?: string) {
     this.apiKey = apiKey;
+    this.model = model || this.defaultModel;
   }
 
   async chat(messages: Message[], options: LLMOptions = {}): Promise<LLMResponse> {
     const opts = {
       temperature: 0,
       maxTokens: 1024,
-      model: this.defaultModel,
+      model: this.model,
       ...options,
     };
 
@@ -52,8 +56,8 @@ export class KimiProvider implements LLMProvider {
 
     if (!response.ok) {
       const error = await response.text();
-      logger.error({ status: response.status, error }, 'Kimi API error');
-      throw new Error(`Kimi error: ${response.status} - ${error}`);
+      logger.error({ status: response.status, error }, 'Mistral API error');
+      throw new Error(`Mistral error: ${response.status} - ${error}`);
     }
 
     const data = await response.json() as {
@@ -62,16 +66,16 @@ export class KimiProvider implements LLMProvider {
       choices: Array<{ message?: { content?: string } }>;
     };
 
-    logger.info({
+    logger.debug({
       model: data.model,
       tokens: data.usage?.total_tokens,
-    }, 'Kimi response');
+    }, 'Mistral response');
 
     return {
       content: data.choices[0]?.message?.content || '',
       tokensUsed: data.usage?.total_tokens,
       model: data.model,
-      provider: 'kimi',
+      provider: 'mistral',
     };
   }
 
@@ -87,9 +91,10 @@ export class KimiProvider implements LLMProvider {
   }
 
   estimateCost(tokens: number): number {
-    // ~$0.50 per 1M input, ~$1.50 per 1M output
+    // Pricing varies by model, using Small as default
+    // ~$0.10 per 1M input, ~$0.30 per 1M output
     // Assuming 70% input, 30% output
-    const avgPricePer1M = 0.50 * 0.7 + 1.50 * 0.3; // ~$0.80 per 1M
+    const avgPricePer1M = 0.10 * 0.7 + 0.30 * 0.3; // ~$0.16 per 1M
     return (tokens / 1_000_000) * avgPricePer1M;
   }
 }

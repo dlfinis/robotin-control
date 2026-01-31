@@ -7,6 +7,12 @@
 
 import { getStorageService } from '../core/storage';
 import { getIngestionService } from '../core/ingestion.service';
+import { getQueryEngine, type QueryResult } from '../core/query';
+import { getResponseProcessor } from '../core/query/response-processor';
+import { getSessionManager } from '../core/context/session.manager';
+import { getProjectStateManager } from '../core/context/project-state.manager';
+import { getGapDetector } from '../core/context/gap-detector';
+import { getNavigationService } from '../core/context/navigation.service';
 import { getLogger } from '../utils/logger';
 import type { Project } from '../models/types';
 import { randomUUID } from 'crypto';
@@ -33,6 +39,21 @@ async function main() {
         break;
       case 'project':
         await handleProjectCommand(args.slice(1));
+        break;
+      case 'query':
+        await queryCommand(args.slice(1));
+        break;
+      case 'chat':
+        await chatCommand();
+        break;
+      case 'session':
+        await handleSessionCommand(args.slice(1));
+        break;
+      case 'state':
+        await handleStateCommand(args.slice(1));
+        break;
+      case 'gaps':
+        await analyzeGaps();
         break;
       case 'status':
         await showStatus();
@@ -205,6 +226,232 @@ async function handleProjectCommand(args: string[]) {
 }
 
 /**
+ * Query the knowledge base
+ */
+async function queryCommand(args: string[]) {
+  const question = args.join(' ').trim();
+  
+  if (!question) {
+    console.error('Usage: robotin query "<question>"');
+    console.error('Example: robotin query "What is the authentication flow?"');
+    process.exit(1);
+  }
+
+  // Remove surrounding quotes if present
+  const cleanQuestion = question.replace(/^["']|["']$/g, '');
+
+  const storage = getStorageService();
+  const queryEngine = getQueryEngine();
+
+  // Get current project
+  const projects = storage.listProjects();
+  if (projects.length === 0) {
+    console.error('No projects found. Create one first with: robotin init <name>');
+    process.exit(1);
+  }
+
+  const project = projects[0];
+
+  console.log(`🔍 Query: ${cleanQuestion}`);
+  console.log(`   Project: ${project.name}`);
+  console.log('');
+
+  try {
+    const result = await queryEngine.query(cleanQuestion, {
+      projectId: project.id,
+    });
+
+    if (!result.success) {
+      console.error('✗ Query failed:', result.error);
+      process.exit(1);
+    }
+
+    // Format and display response
+    const processor = getResponseProcessor();
+    const display = processor.formatForDisplay({
+      answer: result.answer,
+      sources: result.sources.map((s, i) => ({
+        number: i + 1,
+        chunkId: s.chunkId,
+        documentId: s.documentId,
+        content: s.content,
+        relevance: s.score,
+      })),
+      confidence: result.confidence,
+      metadata: {
+        processingTimeMs: result.metadata.queryTimeMs,
+        chunksUsed: result.metadata.chunksRetrieved,
+        tokensUsed: result.metadata.tokensUsed,
+        modelUsed: result.metadata.modelUsed,
+        hasCitations: result.sources.length > 0,
+        isGrounded: result.confidence !== 'insufficient',
+      },
+    });
+
+    console.log(display);
+  } catch (error) {
+    console.error('✗ Query failed');
+    throw error;
+  }
+}
+
+/**
+ * Interactive chat session
+ */
+async function chatCommand() {
+  const storage = getStorageService();
+  const queryEngine = getQueryEngine();
+
+  // Get current project
+  const projects = storage.listProjects();
+  if (projects.length === 0) {
+    console.error('No projects found. Create one first with: robotin init <name>');
+    process.exit(1);
+  }
+
+  const project = projects[0];
+
+  console.log('🤖 Robotin Chat');
+  console.log(`   Project: ${project.name}`);
+  console.log('   Type "exit" or press Ctrl+C to quit');
+  console.log('');
+
+  // Simple readline implementation
+  const readline = await import('readline');
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+
+  const askQuestion = () => {
+    rl.question('You: ', async (input) => {
+      const question = input.trim();
+      
+      if (question.toLowerCase() === 'exit' || question.toLowerCase() === 'quit') {
+        console.log('\n👋 Goodbye!');
+        rl.close();
+        return;
+      }
+
+      if (!question) {
+        askQuestion();
+        return;
+      }
+
+      try {
+        const result = await queryEngine.query(question, {
+          projectId: project.id,
+        });
+
+        if (result.success) {
+          console.log('\n🤖 Robotin:');
+          console.log(result.answer);
+          console.log('');
+        } else {
+          console.log('\n🤖 Robotin: Sorry, I encountered an error.');
+        }
+      } catch (error) {
+        console.log('\n🤖 Robotin: Sorry, something went wrong.');
+      }
+
+      console.log('');
+      askQuestion();
+    });
+  };
+
+  askQuestion();
+}
+
+/**
+ * Handle session commands
+ */
+async function handleSessionCommand(args: string[]) {
+  const subCommand = args[0];
+  const storage = getStorageService();
+  const sessionManager = getSessionManager();
+
+  const projects = storage.listProjects();
+  if (projects.length === 0) {
+    console.error('No projects found');
+    process.exit(1);
+  }
+  const project = projects[0];
+
+  switch (subCommand) {
+    case 'list':
+    case 'ls': {
+      const sessions = await sessionManager.listSessions(project.id, 10);
+      if (sessions.length === 0) {
+        console.log('No sessions found');
+        return;
+      }
+
+      console.log('SESSIONS');
+      console.log('');
+      console.log('  Name                           Messages  Last Activity');
+      console.log('  ──────────────────────────────────────────────────────');
+      
+      for (const session of sessions) {
+        const name = (session.name || 'Unnamed').padEnd(30);
+        const messages = String(session.messageCount).padStart(5);
+        const date = session.lastActivity.toLocaleDateString();
+        console.log(`  ${name} ${messages}    ${date}`);
+      }
+      break;
+    }
+
+    default:
+      console.log('Usage: robotin session <list>');
+      break;
+  }
+}
+
+/**
+ * Handle state commands
+ */
+async function handleStateCommand(args: string[]) {
+  const storage = getStorageService();
+  const stateManager = getProjectStateManager();
+
+  const projects = storage.listProjects();
+  if (projects.length === 0) {
+    console.error('No projects found');
+    process.exit(1);
+  }
+  const project = projects[0];
+
+  const state = await stateManager.getCurrentState(project.id);
+  if (!state) {
+    console.log('No state initialized for this project');
+    console.log('State will be created automatically as you interact with the project.');
+    return;
+  }
+
+  console.log(stateManager.formatStateForDisplay(state));
+}
+
+/**
+ * Analyze documentation gaps
+ */
+async function analyzeGaps() {
+  const storage = getStorageService();
+  const gapDetector = getGapDetector();
+
+  const projects = storage.listProjects();
+  if (projects.length === 0) {
+    console.error('No projects found');
+    process.exit(1);
+  }
+  const project = projects[0];
+
+  console.log('🔍 Analyzing documentation gaps...');
+  console.log('');
+
+  const report = await gapDetector.analyzeProject(project.id);
+  console.log(gapDetector.formatReportForDisplay(report));
+}
+
+/**
  * Show storage status
  */
 async function showStatus() {
@@ -230,6 +477,11 @@ function showHelp() {
   console.log('Commands:');
   console.log('  init <name>           Initialize a new project');
   console.log('  add <file>            Add a document to the project');
+  console.log('  query "<question>"    Ask a question about your documents');
+  console.log('  chat                  Start interactive chat session');
+  console.log('  session list          List conversation sessions');
+  console.log('  state                 Show project state');
+  console.log('  gaps                  Analyze documentation gaps');
   console.log('  project list          List all projects');
   console.log('  project info <name>   Show project details');
   console.log('  status                Show storage status');

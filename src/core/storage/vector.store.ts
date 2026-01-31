@@ -33,7 +33,7 @@ export interface SearchOptions {
 
 const DEFAULT_SEARCH_OPTIONS: SearchOptions = {
   limit: 10,
-  threshold: 0.7,
+  threshold: 0.0, // Return all results, filtering done by caller
 };
 
 /**
@@ -84,8 +84,26 @@ export class VectorStore {
       throw new Error('Database not initialized');
     }
 
-    // Create empty table - LanceDB will infer schema from first insert
-    const table = await this.db.createTable('embeddings', []);
+    // Create table with dummy record to define schema
+    // LanceDB requires at least one record or explicit schema
+    const dummyRecord = {
+      id: 'dummy',
+      chunkId: 'dummy',
+      documentId: 'dummy',
+      projectId: 'dummy',
+      vector: Array(384).fill(0) as number[], // Match embedding dimensions
+      content: '',
+      contentLength: 0,
+      documentType: 'txt',
+      section: '',  // Use empty string instead of null
+      weight: 1.0,
+      createdAt: new Date().toISOString(),
+    };
+
+    const table = await this.db.createTable('embeddings', [dummyRecord]);
+    
+    // Delete the dummy record immediately
+    await table.delete("id = 'dummy'");
 
     logger.info('Created embeddings table');
     return table;
@@ -106,7 +124,7 @@ export class VectorStore {
       chunkId: embedding.chunkId,
       documentId: embedding.documentId,
       projectId: embedding.projectId,
-      vector: Array.from(embedding.vector),
+      vector: Array.from(embedding.vector) as number[],
       content: embedding.content,
       contentLength: embedding.contentLength,
       documentType: embedding.documentType,
@@ -138,7 +156,7 @@ export class VectorStore {
       chunkId: embedding.chunkId,
       documentId: embedding.documentId,
       projectId: embedding.projectId,
-      vector: Array.from(embedding.vector),
+      vector: Array.from(embedding.vector) as number[],
       content: embedding.content,
       contentLength: embedding.contentLength,
       documentType: embedding.documentType,
@@ -176,37 +194,44 @@ export class VectorStore {
     const query = this.table.search(Array.from(queryVector));
 
     // Apply filters
+    // NOTE: LanceDB has issues with string comparisons in WHERE clauses
+    // We do post-filtering in JavaScript for reliability
     const filters: string[] = [];
-    
-    if (opts.projectId) {
-      filters.push(`projectId = '${opts.projectId}'`);
-    }
-    
-    if (opts.documentTypes && opts.documentTypes.length > 0) {
-      const typeList = opts.documentTypes.map(t => `'${t}'`).join(', ');
-      filters.push(`documentType in (${typeList})`);
-    }
-
-    if (filters.length > 0) {
-      query.where(filters.join(' AND '));
-    }
+    // Skip LanceDB WHERE filters for string fields - do post-filtering instead
 
     // Execute search
     const results = await query.limit(opts.limit!).toArray();
 
-    // Map results
-    return results.map((row: Record<string, unknown>) => ({
+    // Map results - convert L2 distance to similarity score
+    // L2 distance is unbounded, so we use a sigmoid-like transformation
+    // Typical useful range is 0-10, with < 3 being good matches
+    const distanceToSimilarity = (dist: number): number => {
+      return Math.max(0, 1 - (dist / 5)); // Normalize: dist 0 = 1.0, dist 5 = 0.0
+    };
+
+    let mapped = results.map((row: Record<string, unknown>) => ({
       chunkId: row.chunkId as string,
       documentId: row.documentId as string,
       projectId: row.projectId as string,
       content: row.content as string,
-      relevance: 1 - ((row._distance as number) || 0),
+      relevance: distanceToSimilarity((row._distance as number) || 0),
       metadata: {
         documentType: row.documentType as DocumentType,
         section: row.section as string | undefined,
         weight: row.weight as number,
       },
-    })).filter(result => result.relevance >= (opts.threshold || 0));
+    }));
+
+    // Post-filter by projectId and documentTypes (LanceDB has issues with string WHERE clauses)
+    if (opts.projectId) {
+      mapped = mapped.filter(r => r.projectId === opts.projectId);
+    }
+    
+    if (opts.documentTypes && opts.documentTypes.length > 0) {
+      mapped = mapped.filter(r => opts.documentTypes!.includes(r.metadata.documentType));
+    }
+
+    return mapped.filter(result => result.relevance >= (opts.threshold || 0));
   }
 
   /**

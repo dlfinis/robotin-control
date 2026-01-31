@@ -222,7 +222,13 @@ export class LLMService {
       this.providers.push(new KimiProvider(this.config.kimiApiKey));
     }
 
-    // 4. OpenAI (if API key configured)
+    // 4. Mistral (if API key configured)
+    if (this.config.mistralApiKey) {
+      const { MistralProvider } = await import('./providers/mistral.provider');
+      this.providers.push(new MistralProvider(this.config.mistralApiKey, this.config.mistralModel));
+    }
+
+    // 5. OpenAI (if API key configured)
     if (this.config.openaiApiKey) {
       this.providers.push(new OpenAIProvider(
         this.config.openaiApiKey,
@@ -273,6 +279,26 @@ export class LLMService {
     throw new Error(
       `All LLM providers failed: ${errors.map(e => `${e.provider} (${e.error})`).join(', ')}`
     );
+  }
+
+  /**
+   * Generate a single response from a prompt (convenience method)
+   */
+  async generate(prompt: string, options: LLMOptions = {}): Promise<LLMResponse> {
+    return this.chat([{ role: 'user', content: prompt }], options);
+  }
+
+  /**
+   * Check if any provider is available
+   */
+  async isAvailable(): Promise<boolean> {
+    await this.initialize();
+    for (const provider of this.providers) {
+      if (await provider.isAvailable()) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /**

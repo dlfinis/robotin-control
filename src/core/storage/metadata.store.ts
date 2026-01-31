@@ -1,4 +1,4 @@
-import Database from 'better-sqlite3';
+import { Database } from 'bun:sqlite';
 import { getConfig } from '../../config';
 import { getLogger } from '../../utils/logger';
 import type {
@@ -17,8 +17,8 @@ import type {
 const logger = getLogger().child({ module: 'MetadataStore' });
 
 export class MetadataStore {
-  private db: Database.Database;
-  private statements: Map<string, Database.Statement>;
+  private db: Database;
+  private statements: Map<string, ReturnType<Database['prepare']>>;
 
   constructor(dbPath?: string) {
     const config = getConfig();
@@ -30,8 +30,8 @@ export class MetadataStore {
 
   private initialize(): void {
     // Enable WAL mode for better concurrency
-    this.db.pragma('journal_mode = WAL');
-    this.db.pragma('foreign_keys = ON');
+    this.db.exec('PRAGMA journal_mode = WAL');
+    this.db.exec('PRAGMA foreign_keys = ON');
     
     this.createTables();
     this.prepareStatements();
@@ -362,14 +362,123 @@ export class MetadataStore {
     return rows.map(row => this.mapChunk(row));
   }
 
+  getChunksByProject(projectId: ProjectId): Chunk[] {
+    const stmt = this.db.prepare('SELECT * FROM chunks WHERE project_id = ?');
+    const rows = stmt.all(projectId) as Record<string, unknown>[];
+    return rows.map(row => this.mapChunk(row));
+  }
+
   deleteChunksByDocument(documentId: DocumentId): void {
     const stmt = this.statements.get('chunk.deleteByDocument')!;
     stmt.run(documentId);
   }
 
+  // Session operations
+  saveSession(session: Session): void {
+    const stmt = this.db.prepare(`
+      INSERT OR REPLACE INTO sessions 
+      (id, project_id, name, context, message_count, last_activity, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `);
+    stmt.run(
+      session.id,
+      session.projectId,
+      session.name || null,
+      JSON.stringify(session.context),
+      session.messageCount,
+      session.lastActivity.toISOString(),
+      session.createdAt.toISOString()
+    );
+  }
+
+  getSession(id: SessionId): Session | undefined {
+    const stmt = this.db.prepare('SELECT * FROM sessions WHERE id = ?');
+    const row = stmt.get(id) as Record<string, unknown> | undefined;
+    return row ? this.mapSession(row) : undefined;
+  }
+
+  listSessions(projectId: ProjectId, limit: number = 10): Session[] {
+    const stmt = this.db.prepare(`
+      SELECT * FROM sessions 
+      WHERE project_id = ? 
+      ORDER BY last_activity DESC 
+      LIMIT ?
+    `);
+    const rows = stmt.all(projectId, limit) as Record<string, unknown>[];
+    return rows.map(row => this.mapSession(row));
+  }
+
+  listAllSessions(): Session[] {
+    const stmt = this.db.prepare('SELECT * FROM sessions ORDER BY last_activity DESC');
+    const rows = stmt.all() as Record<string, unknown>[];
+    return rows.map(row => this.mapSession(row));
+  }
+
+  deleteSession(id: SessionId): void {
+    const stmt = this.db.prepare('DELETE FROM sessions WHERE id = ?');
+    stmt.run(id);
+  }
+
+  // Project state operations
+  saveProjectState(state: ProjectState): void {
+    const stmt = this.db.prepare(`
+      INSERT INTO project_states 
+      (id, project_id, version, state, change_reason, author, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `);
+    stmt.run(
+      state.id,
+      state.projectId,
+      state.version,
+      JSON.stringify(state.state),
+      state.changeReason || null,
+      state.author || null,
+      state.createdAt.toISOString()
+    );
+  }
+
+  getLatestProjectState(projectId: ProjectId): ProjectState | undefined {
+    const stmt = this.db.prepare(`
+      SELECT * FROM project_states 
+      WHERE project_id = ? 
+      ORDER BY version DESC 
+      LIMIT 1
+    `);
+    const row = stmt.get(projectId) as Record<string, unknown> | undefined;
+    return row ? this.mapProjectState(row) : undefined;
+  }
+
+  getProjectStateAtVersion(projectId: ProjectId, version: number): ProjectState | undefined {
+    const stmt = this.db.prepare(`
+      SELECT * FROM project_states 
+      WHERE project_id = ? AND version = ?
+    `);
+    const row = stmt.get(projectId, version) as Record<string, unknown> | undefined;
+    return row ? this.mapProjectState(row) : undefined;
+  }
+
+  getProjectStateHistory(projectId: ProjectId, limit: number = 10): ProjectState[] {
+    const stmt = this.db.prepare(`
+      SELECT * FROM project_states 
+      WHERE project_id = ? 
+      ORDER BY version DESC 
+      LIMIT ?
+    `);
+    const rows = stmt.all(projectId, limit) as Record<string, unknown>[];
+    return rows.map(row => this.mapProjectState(row));
+  }
+
   // Transaction support
   transaction<T>(fn: () => T): T {
-    return this.db.transaction(fn)();
+    this.db.exec('BEGIN');
+    try {
+      const result = fn();
+      this.db.exec('COMMIT');
+      return result;
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
+    }
   }
 
   // Close connection
@@ -419,6 +528,30 @@ export class MetadataStore {
       positionStart: row.position_start as number,
       positionEnd: row.position_end as number,
       metadata: JSON.parse(row.metadata as string),
+      createdAt: new Date(row.created_at as string),
+    };
+  }
+
+  private mapSession(row: Record<string, unknown>): Session {
+    return {
+      id: row.id as string,
+      projectId: row.project_id as string,
+      name: (row.name as string) ?? undefined,
+      context: JSON.parse(row.context as string),
+      messageCount: row.message_count as number,
+      lastActivity: new Date(row.last_activity as string),
+      createdAt: new Date(row.created_at as string),
+    };
+  }
+
+  private mapProjectState(row: Record<string, unknown>): ProjectState {
+    return {
+      id: row.id as string,
+      projectId: row.project_id as string,
+      version: row.version as number,
+      state: JSON.parse(row.state as string),
+      changeReason: (row.change_reason as string) ?? undefined,
+      author: (row.author as string) ?? undefined,
       createdAt: new Date(row.created_at as string),
     };
   }

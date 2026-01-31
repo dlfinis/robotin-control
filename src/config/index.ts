@@ -30,6 +30,10 @@ const configSchema = z.object({
   kimiApiKey: z.string().optional(),
   kimiModel: z.string().default('kimi-k2.5'),
   
+  // Mistral API (European, fast)
+  mistralApiKey: z.string().optional(),
+  mistralModel: z.string().default('mistral-small-latest'),
+  
   // OpenAI API (fallback)
   openaiApiKey: z.string().optional(),
   openaiModel: z.string().default('gpt-3.5-turbo'),
@@ -69,6 +73,8 @@ function loadConfig(): Config {
     deepseekModel: env.DEEPSEEK_MODEL,
     kimiApiKey: env.KIMI_API_KEY,
     kimiModel: env.KIMI_MODEL,
+    mistralApiKey: env.MISTRAL_API_KEY,
+    mistralModel: env.MISTRAL_MODEL,
     openaiApiKey: env.OPENAI_API_KEY,
     openaiModel: env.OPENAI_MODEL,
     embeddingModel: env.EMBEDDING_MODEL,
