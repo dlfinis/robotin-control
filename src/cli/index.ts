@@ -6,9 +6,11 @@
  */
 
 import { getStorageService } from '../core/storage';
+import { getIngestionService } from '../core/ingestion.service';
 import { getLogger } from '../utils/logger';
 import type { Project } from '../models/types';
 import { randomUUID } from 'crypto';
+import { existsSync } from 'fs';
 
 const logger = getLogger();
 
@@ -25,6 +27,9 @@ async function main() {
     switch (command) {
       case 'init':
         await initProject(args[1]);
+        break;
+      case 'add':
+        await addDocument(args[1]);
         break;
       case 'project':
         await handleProjectCommand(args.slice(1));
@@ -80,7 +85,7 @@ async function initProject(name?: string) {
       chunkOverlap: 50,
       embeddingModel: 'Xenova/all-MiniLM-L6-v2',
       lmStudioHost: 'http://localhost:1234',
-    lmStudioModel: 'local-model',
+      lmStudioModel: 'local-model',
     },
   };
 
@@ -92,6 +97,52 @@ async function initProject(name?: string) {
   console.log('Next steps:');
   console.log('  1. Add documents: robotin add <file>');
   console.log('  2. Query: robotin query "What do I need to know?"');
+}
+
+/**
+ * Add a document to the current project
+ */
+async function addDocument(filePath?: string) {
+  if (!filePath) {
+    console.error('Usage: robotin add <file-path>');
+    process.exit(1);
+  }
+
+  // Check if file exists
+  if (!existsSync(filePath)) {
+    console.error(`File not found: ${filePath}`);
+    process.exit(1);
+  }
+
+  const storage = getStorageService();
+  const ingestion = getIngestionService();
+
+  // Get current project (for now, use the first one or require explicit project)
+  const projects = storage.listProjects();
+  if (projects.length === 0) {
+    console.error('No projects found. Create one first with: robotin init <name>');
+    process.exit(1);
+  }
+
+  // Use first project or TODO: implement project selection
+  const project = projects[0];
+
+  console.log(`📄 Ingesting: ${filePath}`);
+  console.log(`   Project: ${project.name}`);
+  console.log('');
+
+  try {
+    const result = await ingestion.ingestFile(project.id, filePath);
+
+    console.log(`✓ Document indexed successfully`);
+    console.log(`  ID: ${result.documentId}`);
+    console.log(`  Chunks: ${result.chunkCount}`);
+    console.log(`  Tokens: ${result.tokenCount}`);
+    console.log(`  Time: ${result.processingTimeMs}ms`);
+  } catch (error) {
+    console.error('✗ Failed to ingest document');
+    throw error;
+  }
 }
 
 /**
@@ -178,6 +229,7 @@ function showHelp() {
   console.log('');
   console.log('Commands:');
   console.log('  init <name>           Initialize a new project');
+  console.log('  add <file>            Add a document to the project');
   console.log('  project list          List all projects');
   console.log('  project info <name>   Show project details');
   console.log('  status                Show storage status');

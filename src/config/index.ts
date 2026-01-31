@@ -18,11 +18,19 @@ const configSchema = z.object({
   // Logging
   logLevel: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal']).default('info'),
   
-  // LLM Configuration (LM Studio)
+  // LM Studio (local LLM)
   lmStudioHost: z.string().default('http://localhost:1234'),
   lmStudioModel: z.string().default('local-model'),
   
-  // Fallback (optional)
+  // DeepSeek API (cheapest option, ~90% cheaper than OpenAI)
+  deepseekApiKey: z.string().optional(),
+  deepseekModel: z.string().default('deepseek-chat'),
+  
+  // Kimi API (best long context, 256K)
+  kimiApiKey: z.string().optional(),
+  kimiModel: z.string().default('kimi-k2.5'),
+  
+  // OpenAI API (fallback)
   openaiApiKey: z.string().optional(),
   openaiModel: z.string().default('gpt-3.5-turbo'),
   
@@ -57,6 +65,10 @@ function loadConfig(): Config {
     logLevel: env.ROBOTIN_LOG_LEVEL,
     lmStudioHost: env.LM_STUDIO_HOST,
     lmStudioModel: env.LM_STUDIO_MODEL,
+    deepseekApiKey: env.DEEPSEEK_API_KEY,
+    deepseekModel: env.DEEPSEEK_MODEL,
+    kimiApiKey: env.KIMI_API_KEY,
+    kimiModel: env.KIMI_MODEL,
     openaiApiKey: env.OPENAI_API_KEY,
     openaiModel: env.OPENAI_MODEL,
     embeddingModel: env.EMBEDDING_MODEL,

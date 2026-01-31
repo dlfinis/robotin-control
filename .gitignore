@@ -14,10 +14,9 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
+# Environment files (local only - .env.local is the template)
 .env
-.env.local
 .env.*.local
-
 
 .DS_Store
 .vscode/
